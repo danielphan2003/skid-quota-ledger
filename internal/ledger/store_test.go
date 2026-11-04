@@ -110,6 +110,21 @@ func TestAppendKeepsChangedReadings(t *testing.T) {
 	assertCounts(t, accepted, skipped, 4, 0)
 }
 
+func TestAppendTreatsResetsWithinAMinuteAsTheSame(t *testing.T) {
+	store, _, _ := newStore(t)
+	first := reading(t0, 50)
+	first.ResetsAt = ms(t0.Add(5 * time.Hour).UnixMilli())
+	jittered := reading(t0.Add(time.Minute), 50)
+	jittered.ResetsAt = ms(*first.ResetsAt + 59_999)
+	moved := reading(t0.Add(2*time.Minute), 50)
+	moved.ResetsAt = ms(*first.ResetsAt - 60_001)
+
+	accepted, skipped := appendSamples(t, store, first, jittered, moved)
+
+	assertCounts(t, accepted, skipped, 2, 1)
+	assertStamps(t, store.Since(0, 100), t0, t0.Add(2*time.Minute))
+}
+
 func TestAppendIsIdempotentForRetriedBatches(t *testing.T) {
 	store, _, _ := newStore(t)
 	batch := []ledger.Sample{reading(t0, 50), reading(t0.Add(45*time.Minute), 40)}

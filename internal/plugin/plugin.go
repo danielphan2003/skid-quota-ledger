@@ -16,10 +16,11 @@ const (
 var Version = "0.1.0"
 
 type Plugin struct {
-	now    func() time.Time
-	mu     sync.Mutex
-	config config
-	store  *ledger.Store
+	now      func() time.Time
+	mu       sync.Mutex
+	config   config
+	store    *ledger.Store
+	throttle *headerThrottle
 }
 
 func New(now func() time.Time) *Plugin {
@@ -47,6 +48,8 @@ func (p *Plugin) Call(method string, request []byte) (reply []byte, ok bool) {
 		return success(managementRoutes())
 	case "management.handle":
 		return p.handleManagement(request)
+	case "usage.handle":
+		return p.handleUsage(request)
 	default:
 		return failure("unknown_method", "unknown method: "+method)
 	}
@@ -79,7 +82,7 @@ func (p *Plugin) useConfig(next config) error {
 	if err != nil {
 		return err
 	}
-	p.config, p.store = next, store
+	p.config, p.store, p.throttle = next, store, &headerThrottle{}
 	return nil
 }
 
@@ -89,6 +92,14 @@ func (p *Plugin) currentStore() *ledger.Store {
 	return p.store
 }
 
+// currentRecorder returns the store with the header throttle that belongs
+// to it; both are nil until the plugin is configured.
+func (p *Plugin) currentRecorder() (*ledger.Store, *headerThrottle) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.store, p.throttle
+}
+
 func registration() any {
 	return map[string]any{
 		"schema_version": rawManagementResponseSchemaVersion,
@@ -96,11 +107,11 @@ func registration() any {
 			"Name":             id,
 			"Version":          Version,
 			"Author":           "Silthus",
-			"GitHubRepository": "https://github.com/Silthus/cliproxy-quota-ledger",
+			"GitHubRepository": "https://github.com/danielphan2003/skid-quota-ledger",
 			"Logo":             "https://github.com/Silthus.png",
 			"ConfigFields":     configFields,
 		},
-		"capabilities": map[string]bool{"management_api": true},
+		"capabilities": map[string]bool{"management_api": true, "usage_plugin": true},
 	}
 }
 
