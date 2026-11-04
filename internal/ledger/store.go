@@ -20,6 +20,11 @@ const (
 	unchangedTolerance = 0.05
 	unchangedSpan      = 30 * time.Minute
 	pruneInterval      = time.Hour
+	// ResetTolerance is how far apart two resets_at may be and still name the
+	// same window reset. Sources disagree by fractions of a second (the panel's
+	// quota API against response headers), and a reset derived from a
+	// relative "resets after N seconds" drifts by a second or so per request.
+	ResetTolerance = time.Minute
 )
 
 type Store struct {
@@ -116,7 +121,11 @@ func sameReset(a, b *int64) bool {
 	if a == nil || b == nil {
 		return a == b
 	}
-	return *a == *b
+	delta := *a - *b
+	if delta < 0 {
+		delta = -delta
+	}
+	return delta <= ResetTolerance.Milliseconds()
 }
 
 func (s *Store) holdsInstant(sample Sample) bool {

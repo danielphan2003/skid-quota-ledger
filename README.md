@@ -3,9 +3,11 @@
 A native [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) (CPA) v8 plugin that stores
 quota snapshots, so a management panel can chart remaining quota and burn rate over time.
 
-Something outside the plugin, such as a balancer script or the panel, reads quota and posts
-samples. The plugin stores them in an append-only JSONL file and serves them back. It does not
-poll, has no pages, and makes no outbound requests.
+Samples come from two places. Something outside the plugin, such as a balancer script or the
+panel, reads quota and posts samples; and the plugin reads the rate-limit headers of every
+upstream response CPA reports to it (see [Response headers](#response-headers)). It stores them
+in an append-only JSONL file and serves them back. It does not poll, has no pages, and makes no
+outbound requests.
 
 ## Install
 
@@ -73,7 +75,7 @@ rejected batch stores nothing.
 A sample is skipped when it adds no information:
 
 - the last stored sample of its series `(auth, provider, window)` has the same `remaining`
-  (within 0.05) and `resets_at`, and is less than 30 minutes older,
+  (within 0.05) and `resets_at` (within 60 seconds), and is less than 30 minutes older,
 - its series already has a sample at the same `at`, so retried batches are idempotent,
 - it is older than the retention window.
 
@@ -85,6 +87,21 @@ curl -s -H "Authorization: Bearer $CPA_MANAGEMENT_KEY" \
 curl -s -H "Authorization: Bearer $CPA_MANAGEMENT_KEY" \
   "http://127.0.0.1:8317/v0/management/quota-ledger/samples?since=1793100000000"
 ```
+
+## Response headers
+
+The plugin declares the `usage_plugin` capability, so CPA hands it every completed upstream
+request. From OAuth logins (records whose `AuthType` is an API key are ignored) it maps:
+
+| Provider | Headers                                                                                   | Windows                                      |
+| -------- | ----------------------------------------------------------------------------------------- | -------------------------------------------- |
+| `claude` | `Anthropic-Ratelimit-Unified-{5h,7d,7d_oi}-{Utilization,Reset}`                           | `five-hour`, `seven-day`, `seven-day-fable`  |
+| `codex`  | `X-Codex-{Primary,Secondary}-{Used-Percent,Window-Minutes,Reset-At,Reset-After-Seconds}`  | `five-hour` (300 min), `weekly` (10080 min)  |
+
+`auth` is the auth file's name (the base of CPA's `AuthID`), as the panel keys it. Resets are
+read as unix seconds or RFC 3339 and rounded to the minute. Every request carries these headers,
+so a series is written only when its `remaining` moved by 0.5 points or more, its reset changed,
+or 5 minutes passed since its last header sample; the skip rules above still apply.
 
 ## Develop
 

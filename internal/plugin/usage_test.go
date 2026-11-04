@@ -3,6 +3,7 @@ package plugin_test
 import (
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -149,4 +150,97 @@ func readLines(t *testing.T, path string) []string {
 		t.Fatal(err)
 	}
 	return strings.Fields(strings.TrimSpace(string(raw)))
+}
+
+// clockedPlugin is registeredPlugin with a clock the test moves.
+func clockedPlugin(t *testing.T) (*plugin.Plugin, string, *time.Time) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "ledger", "samples.jsonl")
+	at := now
+	p := plugin.New(func() time.Time { return at })
+	if reply := register(t, p, "plugin.register", "enabled: true\npriority: 0\npath: "+path+"\n"); !reply.OK {
+		t.Fatalf("plugin.register failed: %+v", reply.Error)
+	}
+	return p, path, &at
+}
+
+func claudeWeek(utilization string, reset time.Time) map[string][]string {
+	return map[string][]string{
+		"Anthropic-Ratelimit-Unified-7d-Utilization": {utilization},
+		"Anthropic-Ratelimit-Unified-7d-Reset":       {unix(reset)},
+	}
+}
+
+func TestUsageKeysSamplesByAuthFileName(t *testing.T) {
+	p, _ := registeredPlugin(t)
+	usage(t, p, "team/claude-a@example.com.json", "claude", claudeWeek("0.2", now.Add(time.Hour)))
+	if week := stored(t, p)["claude/seven-day"]; week.Auth != "claude-a@example.com.json" {
+		t.Fatalf("auth = %q, want the file name", week.Auth)
+	}
+}
+
+func TestUsageReadsRFC3339Resets(t *testing.T) {
+	p, _ := registeredPlugin(t)
+	reset := now.Add(3 * time.Hour)
+	usage(t, p, "claude.json", "claude", map[string][]string{
+		"Anthropic-Ratelimit-Unified-5h-Utilization": {"0.5"},
+		"Anthropic-Ratelimit-Unified-5h-Reset":       {reset.Format(time.RFC3339)},
+	})
+	if session := stored(t, p)["claude/five-hour"]; session.ResetsAt == nil || *session.ResetsAt != reset.UnixMilli() {
+		t.Fatalf("five-hour = %+v", session)
+	}
+}
+
+func TestUsageSkipsAPIKeyAuths(t *testing.T) {
+	p, _ := registeredPlugin(t)
+	record := map[string]any{
+		"Provider":        "claude",
+		"AuthID":          "claude-key",
+		"AuthType":        "apikey",
+		"ResponseHeaders": claudeWeek("0.2", now.Add(time.Hour)),
+	}
+	if reply := call(t, p, "usage.handle", record); !reply.OK {
+		t.Fatalf("usage.handle failed: %+v", reply.Error)
+	}
+	if got := stored(t, p); len(got) != 0 {
+		t.Fatalf("stored %+v, want nothing", got)
+	}
+}
+
+func TestUsageRoundsCountdownResetsToTheMinute(t *testing.T) {
+	p, path, at := clockedPlugin(t)
+	codex := func(after string) map[string][]string {
+		return map[string][]string{
+			"X-Codex-Primary-Used-Percent":        {"10"},
+			"X-Codex-Primary-Window-Minutes":      {"300"},
+			"X-Codex-Primary-Reset-After-Seconds": {after},
+		}
+	}
+	usage(t, p, "codex.json", "codex", codex("3600.4"))
+	*at = at.Add(7 * time.Second)
+	usage(t, p, "codex.json", "codex", codex("3592"))
+	if lines := readLines(t, path); len(lines) != 1 {
+		t.Fatalf("ledger has %d lines, want 1: %v", len(lines), lines)
+	}
+	if session := stored(t, p)["codex/five-hour"]; *session.ResetsAt != now.Add(time.Hour).UnixMilli() {
+		t.Fatalf("five-hour reset = %d, want the hour", *session.ResetsAt)
+	}
+}
+
+func TestUsageThrottlesHeaderSamplesPerSeries(t *testing.T) {
+	p, path, at := clockedPlugin(t)
+	reset := now.Add(50 * time.Hour)
+	step := func(by time.Duration, utilization string, reset time.Time) {
+		*at = at.Add(by)
+		usage(t, p, "claude.json", "claude", claudeWeek(utilization, reset))
+	}
+	step(0, "0.100", reset)                            // first sample: written
+	step(time.Minute, "0.104", reset)                  // moved 0.4 points: skipped
+	step(time.Minute, "0.106", reset)                  // moved 0.6 since the last write: written
+	step(time.Minute, "0.107", reset)                  // moved 0.1: skipped
+	step(5*time.Minute, "0.107", reset)                // quiet for 6 minutes and moved 0.1: written
+	step(time.Minute, "0.107", now.Add(200*time.Hour)) // new reset: written
+	if lines := readLines(t, path); len(lines) != 4 {
+		t.Fatalf("ledger has %d lines, want 4: %v", len(lines), lines)
+	}
 }

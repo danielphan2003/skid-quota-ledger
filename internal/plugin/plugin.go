@@ -16,10 +16,11 @@ const (
 var Version = "0.1.0"
 
 type Plugin struct {
-	now    func() time.Time
-	mu     sync.Mutex
-	config config
-	store  *ledger.Store
+	now      func() time.Time
+	mu       sync.Mutex
+	config   config
+	store    *ledger.Store
+	throttle *headerThrottle
 }
 
 func New(now func() time.Time) *Plugin {
@@ -81,7 +82,7 @@ func (p *Plugin) useConfig(next config) error {
 	if err != nil {
 		return err
 	}
-	p.config, p.store = next, store
+	p.config, p.store, p.throttle = next, store, &headerThrottle{}
 	return nil
 }
 
@@ -89,6 +90,14 @@ func (p *Plugin) currentStore() *ledger.Store {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.store
+}
+
+// currentRecorder returns the store with the header throttle that belongs
+// to it; both are nil until the plugin is configured.
+func (p *Plugin) currentRecorder() (*ledger.Store, *headerThrottle) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.store, p.throttle
 }
 
 func registration() any {
