@@ -20,6 +20,10 @@ const (
 	// history out of the newest-first page the panel reads.
 	headerMinMove  = 0.5
 	headerMaxQuiet = 5 * time.Minute
+	// maxResetAhead bounds a plausible reset: the longest quota window is a
+	// month. A reset sent in milliseconds would otherwise read as seconds and
+	// land millennia ahead.
+	maxResetAhead = 62 * 24 * time.Hour
 )
 
 // usageRecord is the part of CPA's pluginapi.UsageRecord the ledger reads. CPA
@@ -142,7 +146,11 @@ func samplesFromHeaders(record usageRecord, now time.Time) []ledger.Sample {
 	provider := strings.ToLower(strings.TrimSpace(record.Provider))
 	at := now.UnixMilli()
 	sample := func(window string, remaining float64, resetsAt *int64) ledger.Sample {
-		return ledger.Sample{At: at, Auth: auth, Provider: provider, Window: window, Remaining: remaining, ResetsAt: roundToMinute(resetsAt)}
+		resetsAt = roundToMinute(resetsAt)
+		if resetsAt != nil && *resetsAt > now.Add(maxResetAhead).UnixMilli() {
+			resetsAt = nil
+		}
+		return ledger.Sample{At: at, Auth: auth, Provider: provider, Window: window, Remaining: remaining, ResetsAt: resetsAt}
 	}
 
 	var samples []ledger.Sample

@@ -101,7 +101,11 @@ request. From OAuth logins (records whose `AuthType` is an API key are ignored) 
 `auth` is the auth file's name (the base of CPA's `AuthID`), as the panel keys it. Resets are
 read as unix seconds or RFC 3339 and rounded to the minute. Every request carries these headers,
 so a series is written only when its `remaining` moved by 0.5 points or more, its reset changed,
-or 5 minutes passed since its last header sample; the skip rules above still apply.
+or 5 minutes passed since its last header sample. The skip rules above still apply, so a flat
+series still gets a sample only every 30 minutes. A reset more than 62 days ahead (for example
+milliseconds sent where seconds belong) is stored as unknown. Only the windows in the table are
+recorded from headers; other windows, such as Codex's additional per-model limits, get samples
+only from whatever posts them (the panel's quota page).
 
 ## Develop
 

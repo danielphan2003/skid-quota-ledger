@@ -244,3 +244,15 @@ func TestUsageThrottlesHeaderSamplesPerSeries(t *testing.T) {
 		t.Fatalf("ledger has %d lines, want 4: %v", len(lines), lines)
 	}
 }
+
+func TestUsageDropsImplausibleResets(t *testing.T) {
+	p, _ := registeredPlugin(t)
+	usage(t, p, "claude.json", "claude", map[string][]string{
+		"Anthropic-Ratelimit-Unified-7d-Utilization": {"0.2"},
+		// milliseconds where seconds belong
+		"Anthropic-Ratelimit-Unified-7d-Reset": {strconv.FormatInt(now.Add(time.Hour).UnixMilli(), 10)},
+	})
+	if week := stored(t, p)["claude/seven-day"]; week.Remaining != 80 || week.ResetsAt != nil {
+		t.Fatalf("seven-day = %+v, want the reading without a reset", week)
+	}
+}
