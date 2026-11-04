@@ -135,7 +135,7 @@ func TestRegisterDeclaresManagementPluginWithConfigFields(t *testing.T) {
 	if err := json.Unmarshal(reply.Result, &registration); err != nil {
 		t.Fatal(err)
 	}
-	if registration.SchemaVersion != 6 || registration.Metadata.Name != "quota-ledger" || !registration.Capabilities["management_api"] {
+	if registration.SchemaVersion != 6 || registration.Metadata.Name != "quota-ledger" || !registration.Capabilities["management_api"] || !registration.Capabilities["usage_plugin"] {
 		t.Fatalf("registration = %+v", registration)
 	}
 	fields := registration.Metadata.ConfigFields

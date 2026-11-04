@@ -47,6 +47,8 @@ func (p *Plugin) Call(method string, request []byte) (reply []byte, ok bool) {
 		return success(managementRoutes())
 	case "management.handle":
 		return p.handleManagement(request)
+	case "usage.handle":
+		return p.handleUsage(request)
 	default:
 		return failure("unknown_method", "unknown method: "+method)
 	}
@@ -96,11 +98,11 @@ func registration() any {
 			"Name":             id,
 			"Version":          Version,
 			"Author":           "Silthus",
-			"GitHubRepository": "https://github.com/Silthus/cliproxy-quota-ledger",
+			"GitHubRepository": "https://github.com/danielphan2003/skid-quota-ledger",
 			"Logo":             "https://github.com/Silthus.png",
 			"ConfigFields":     configFields,
 		},
-		"capabilities": map[string]bool{"management_api": true},
+		"capabilities": map[string]bool{"management_api": true, "usage_plugin": true},
 	}
 }
 
